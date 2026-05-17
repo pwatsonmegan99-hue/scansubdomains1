@@ -1,11 +1,15 @@
 const dns = require("dns").promises;
 
-const MAX_DOMAINS = 5;
+const MAX_DOMAINS = 50;
 const MAX_SUBDOMAINS_PER_DOMAIN = 100;
 
 function isValidDomain(domain) {
   const regex = /^(?!-)(?:[a-zA-Z0-9-]{1,63}\.)+[a-zA-Z]{2,}$/;
   return regex.test(domain);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchSubdomains(domain) {
@@ -42,9 +46,11 @@ async function fetchSubdomains(domain) {
     }
 
     url = data.links?.next || null;
+
+    await sleep(300);
   }
 
-  return subdomains;
+  return [...new Set(subdomains)].sort();
 }
 
 async function hasSpfRecord(subdomain) {
@@ -58,6 +64,34 @@ async function hasSpfRecord(subdomain) {
   } catch {
     return false;
   }
+}
+
+async function checkSpfInBatches(subdomains, batchSize = 20) {
+  const spfSubdomains = [];
+
+  for (let i = 0; i < subdomains.length; i += batchSize) {
+    const batch = subdomains.slice(i, i + batchSize);
+
+    const checks = await Promise.all(
+      batch.map(async (subdomain) => {
+        const hasSpf = await hasSpfRecord(subdomain);
+
+        if (hasSpf) {
+          return subdomain;
+        }
+
+        return null;
+      })
+    );
+
+    for (const result of checks) {
+      if (result) {
+        spfSubdomains.push(result);
+      }
+    }
+  }
+
+  return spfSubdomains.sort();
 }
 
 module.exports = async function handler(req, res) {
@@ -77,7 +111,11 @@ module.exports = async function handler(req, res) {
     }
 
     const cleanDomains = [
-      ...new Set(domains.map((d) => String(d).trim().toLowerCase()))
+      ...new Set(
+        domains
+          .map((d) => String(d).trim().toLowerCase())
+          .filter(Boolean)
+      )
     ];
 
     if (cleanDomains.length > MAX_DOMAINS) {
@@ -98,26 +136,20 @@ module.exports = async function handler(req, res) {
 
     for (const domain of cleanDomains) {
       const subdomains = await fetchSubdomains(domain);
-      const spfSubdomains = [];
-
-      await Promise.all(
-        subdomains.map(async (subdomain) => {
-          const hasSpf = await hasSpfRecord(subdomain);
-
-          if (hasSpf) {
-            spfSubdomains.push(subdomain);
-          }
-        })
-      );
+      const spfSubdomains = await checkSpfInBatches(subdomains, 20);
 
       results.push({
         domain,
         checkedSubdomains: subdomains.length,
-        spfSubdomains: spfSubdomains.sort()
+        spfSubdomains
       });
+
+      await sleep(500);
     }
 
-    return res.status(200).json({ results });
+    return res.status(200).json({
+      results
+    });
   } catch (error) {
     return res.status(500).json({
       error: error.message || "Internal server error."
