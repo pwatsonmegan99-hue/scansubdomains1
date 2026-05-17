@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SPF Subdomain Checker</title>
+
+  <title>SPF Subdomain Checker WMN </title>
 
   <style>
     * {
@@ -22,7 +23,7 @@
     }
 
     .container {
-      width: min(1050px, 92%);
+      width: min(1100px, 92%);
       margin: 0 auto;
       padding: 48px 0;
     }
@@ -50,7 +51,7 @@
     }
 
     .subtitle {
-      max-width: 700px;
+      max-width: 760px;
       margin: 16px auto 0;
       color: #9ca3af;
       line-height: 1.6;
@@ -93,7 +94,7 @@
 
     textarea {
       width: 100%;
-      min-height: 230px;
+      min-height: 250px;
       resize: vertical;
       border-radius: 16px;
       border: 1px solid #334155;
@@ -128,6 +129,7 @@
       display: flex;
       gap: 12px;
       margin-top: 20px;
+      flex-wrap: wrap;
     }
 
     button {
@@ -142,6 +144,7 @@
 
     .primary {
       flex: 1;
+      min-width: 160px;
       background: linear-gradient(135deg, #2563eb, #0ea5e9);
       color: white;
     }
@@ -176,6 +179,7 @@
       border: 1px solid rgba(96, 165, 250, 0.18);
       color: #bfdbfe;
       min-height: 48px;
+      line-height: 1.5;
     }
 
     .warning {
@@ -208,8 +212,8 @@
     }
 
     pre {
-      min-height: 390px;
-      max-height: 620px;
+      min-height: 430px;
+      max-height: 680px;
       overflow: auto;
       margin: 0;
       background: #020617;
@@ -243,6 +247,10 @@
         align-items: flex-start;
         flex-direction: column;
       }
+
+      button {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -250,11 +258,11 @@
 <body>
   <main class="container">
     <header class="header">
-      <div class="badge">Vercel-ready frontend</div>
+      <div class="badge">Vercel SPF Scanner</div>
       <h1>SPF Subdomain Checker</h1>
       <p class="subtitle">
-        Enter domains you own or are authorized to test. The frontend sends them to your Vercel API route,
-        which checks VirusTotal subdomains and returns subdomains with SPF records.
+        Enter authorized domains. The backend will fetch subdomains from VirusTotal
+        and check which subdomains have SPF records.
       </p>
     </header>
 
@@ -262,11 +270,11 @@
       <div class="card">
         <h2>Scan Domains</h2>
         <p class="muted">
-          Add one domain per line. Example: <strong>example.com</strong>
+          Add one domain per line. Maximum supported in backend: 50 domains.
         </p>
 
         <label for="domains">Domains</label>
-        <textarea id="domains" placeholder="example.com&#10;example.org"></textarea>
+        <textarea id="domains" placeholder="example.com&#10;example.org&#10;example.net"></textarea>
 
         <label class="checkbox">
           <input type="checkbox" id="authorized" />
@@ -283,8 +291,8 @@
         </div>
 
         <div class="warning">
-          Do not place your VirusTotal API key in this HTML file. Keep it in a Vercel serverless API route
-          as an environment variable named <strong>VT_API_KEY</strong>.
+          Important: Do not put your VirusTotal API key in this HTML file.
+          Add it in Vercel Environment Variables as <strong>VT_API_KEY</strong>.
         </div>
       </div>
 
@@ -302,12 +310,13 @@
         <div class="actions">
           <button class="secondary" id="copyBtn">Copy Results</button>
           <button class="secondary" id="downloadBtn">Download TXT</button>
+          <button class="secondary" id="csvBtn">Download CSV</button>
         </div>
       </div>
     </section>
 
     <p class="footer">
-      Built for authorized domain security checks.
+      Built for authorized domain security checks only.
     </p>
   </main>
 
@@ -316,6 +325,7 @@
     const clearBtn = document.getElementById("clearBtn");
     const copyBtn = document.getElementById("copyBtn");
     const downloadBtn = document.getElementById("downloadBtn");
+    const csvBtn = document.getElementById("csvBtn");
 
     const domainsInput = document.getElementById("domains");
     const authorizedInput = document.getElementById("authorized");
@@ -323,10 +333,13 @@
     const resultsBox = document.getElementById("results");
     const countPill = document.getElementById("countPill");
 
+    let latestResults = [];
+
     scanBtn.addEventListener("click", scanDomains);
     clearBtn.addEventListener("click", clearAll);
     copyBtn.addEventListener("click", copyResults);
     downloadBtn.addEventListener("click", downloadResults);
+    csvBtn.addEventListener("click", downloadCSV);
 
     async function scanDomains() {
       const domains = domainsInput.value
@@ -345,7 +358,9 @@
       }
 
       scanBtn.disabled = true;
-      setStatus("Scanning. This may take a moment...");
+      latestResults = [];
+
+      setStatus("Scanning... This may take some time if you entered many domains.");
       resultsBox.textContent = "Waiting for results from /api/scan...";
       countPill.textContent = "Scanning...";
 
@@ -364,11 +379,15 @@
           throw new Error(data.error || "Scan failed.");
         }
 
-        const output = formatResults(data.results);
+        latestResults = data.results || [];
+
+        const output = formatResults(latestResults);
+
         resultsBox.textContent = output.text;
-        countPill.textContent = output.count + " results";
+        countPill.textContent = output.count + " SPF results";
         setStatus("Scan complete.");
       } catch (error) {
+        latestResults = [];
         resultsBox.textContent = "";
         countPill.textContent = "0 results";
         setStatus(error.message, true);
@@ -412,6 +431,7 @@
     function clearAll() {
       domainsInput.value = "";
       authorizedInput.checked = false;
+      latestResults = [];
       resultsBox.textContent = "No results yet.";
       countPill.textContent = "0 results";
       setStatus("Ready. Enter domains and start a scan.");
@@ -455,7 +475,56 @@
       document.body.removeChild(link);
 
       URL.revokeObjectURL(url);
-      setStatus("Results downloaded.");
+      setStatus("TXT file downloaded.");
+    }
+
+    function downloadCSV() {
+      if (!latestResults.length) {
+        setStatus("There are no results to download as CSV.", true);
+        return;
+      }
+
+      const rows = [
+        ["domain", "checked_subdomains", "spf_subdomain"]
+      ];
+
+      latestResults.forEach((item) => {
+        const domain = item.domain || "";
+        const checked = item.checkedSubdomains || 0;
+        const spfSubdomains = item.spfSubdomains || [];
+
+        if (spfSubdomains.length === 0) {
+          rows.push([domain, checked, ""]);
+        } else {
+          spfSubdomains.forEach((subdomain) => {
+            rows.push([domain, checked, subdomain]);
+          });
+        }
+      });
+
+      const csv = rows
+        .map((row) =>
+          row
+            .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+            .join(",")
+        )
+        .join("\n");
+
+      const blob = new Blob([csv], {
+        type: "text/csv"
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = "spf-subdomains.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+      setStatus("CSV file downloaded.");
     }
 
     function setStatus(message, isError = false) {
